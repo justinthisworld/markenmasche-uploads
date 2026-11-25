@@ -9,7 +9,7 @@ body{margin:0;background:#111;color:#eee;font:15px sans-serif;display:flex;gap:1
 #ui button{font-size:18px;padding:10px 18px;margin:6px 0;display:block}
 #st{white-space:pre-wrap;max-width:320px}
 </style></head><body><canvas id="c" width="1080" height="1920"></canvas><canvas id="out" width="1080" height="1920"></canvas>
-<div id="ui"><b>markenmasche GPU-Render</b><button id="pick">Zielordner wählen (einmalig)</button><div id="dir"></div><button id="go">Rendern starten</button><button id="sv" disabled>Video speichern</button><div id="st">Lädt Szene…</div></div>
+<div id="ui"><b>markenmasche GPU-Render</b><div style="margin:6px 0">GitHub-Schlüssel (einmalig):<br><input id="tok" type="password" style="width:260px;font-size:15px" placeholder="github_pat_…"><button id="tsave">Schlüssel speichern</button></div><div id="dir"></div><button id="go">Rendern starten</button><button id="sv" disabled>Video speichern</button><div id="st">Lädt Szene…</div></div>
 <script type="module">
 import * as THREE from 'three';import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {EffectComposer} from 'three/addons/postprocessing/EffectComposer.js';import {RenderPass} from 'three/addons/postprocessing/RenderPass.js';
@@ -153,17 +153,16 @@ const FPS=60,DUR=6.0,N=Math.round(DUR*FPS);let VIDEO=null;const st=$('st');
 async function go(){$('go').disabled=true;const t0=performance.now();
  const mux=new Muxer({target:new ArrayBufferTarget(),video:{codec:'avc',width:1080,height:1920,frameRate:FPS},fastStart:'in-memory'});
  const enc=new VideoEncoder({output:(c,m)=>mux.addVideoChunk(c,m),error:e=>{st.textContent='Encoder-Fehler: '+e.message;}});
- enc.configure({codec:'avc1.640034',width:1080,height:1920,bitrate:28e6,framerate:FPS,hardwareAcceleration:'prefer-hardware',avc:{format:'avc'}});
+ enc.configure({codec:'avc1.640034',width:1080,height:1920,bitrate:window.BITRATE||12e6,framerate:FPS,hardwareAcceleration:'prefer-hardware',avc:{format:'avc'}});
  for(let f=0;f<N;f++){window.render(f/FPS);compose();const vf=new VideoFrame(OUT,{timestamp:Math.round(f*1e6/FPS),duration:Math.round(1e6/FPS)});enc.encode(vf,{keyFrame:f%60===0});vf.close();
   while(enc.encodeQueueSize>6)await new Promise(r=>setTimeout(r,2));if(f%10===0){st.textContent=`Rendere Bild ${f+1}/${N} · ${((performance.now()-t0)/1000).toFixed(1)} s`;await new Promise(r=>setTimeout(r,0));}}
  await enc.flush();mux.finalize();VIDEO=new Blob([mux.target.buffer],{type:'video/mp4'});
  const secs=((performance.now()-t0)/1000).toFixed(1);st.textContent=`Fertig: ${N} Bilder in ${secs} s (${(VIDEO.size/1e6).toFixed(1)} MB). `;window.RESULT={secs,size:VIDEO.size};$('sv').disabled=false;}
 
 $("go").onclick=go;window.go=go;window.compose=compose;
-import {pickDir,dirStatus,ensurePerm,saveToDir} from './lib/savedir.js';
-async function showDir(){const d=await dirStatus();$('dir').textContent=d.name?('Ordner: '+d.name+' ('+(d.perm==='granted'?'Schreibzugriff ok':'Zugriff bestätigen')+')'):'Kein Ordner gewählt';return d;}
-$('pick').onclick=async()=>{try{await pickDir();await ensurePerm();}catch(e){$('dir').textContent='Abgebrochen: '+e.message;}showDir();};
-showDir();window.dirStatus=dirStatus;
-const save=async()=>{const name=(window.OUTNAME||'render.mp4');try{const p=await saveToDir(name,VIDEO);st.textContent+='\nGespeichert in '+p+' ✓';window.SAVED=p;return p;}catch(e){st.textContent+='\nOrdner-Speichern ging nicht ('+e.message+'), Download stattdessen';const a=document.createElement('a');a.href=URL.createObjectURL(VIDEO);a.download=name;document.body.appendChild(a);a.click();window.SAVED='download';return 'download';}};$('sv').onclick=save;window.save=save;
+import {hasToken,setToken,uploadGH} from './lib/ghsave.js';
+function showTok(){$('dir').textContent=hasToken()?'GitHub-Schlüssel gespeichert ✓ – Upload läuft automatisch':'Noch kein GitHub-Schlüssel';}
+$('tsave').onclick=()=>{const v=$('tok').value;if(v.trim().length>20){setToken(v);$('tok').value='';}showTok();};showTok();window.hasToken=hasToken;
+const save=async()=>{const name=(window.OUTNAME||'render.mp4');st.textContent+='\nLade zu GitHub hoch…';try{const p=await uploadGH('inbox/'+name,VIDEO);st.textContent+='\nHochgeladen: '+p+' ✓';window.SAVED=p;return p;}catch(e){st.textContent+='\nUpload fehlgeschlagen: '+e.message;window.SAVED='error: '+e.message;return null;}};$('sv').onclick=save;window.save=save;
 window.init(WORDS_EMB);window.DBG={AO,BLOOM,BOK,R,S,COMP,KEY,CAM,HERO,NPC,THREE};window.PLAIN=false;window.ready=true;st.textContent='Szene geladen. Bereit.';
 </script></body></html>
