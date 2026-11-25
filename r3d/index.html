@@ -62,7 +62,7 @@ const MM='assets/chars/';
 const MW='assets/chars/';
 async function chr(u,h=1.8){const g=await L.loadAsync(u);const r=g.scene;prep(r);S.add(r);const mx=new THREE.AnimationMixer(r);const A={};g.animations.forEach(a=>{A[a.name]=mx.clipAction(a);A[a.name].play();A[a.name].weight=0;});
  r.updateMatrixWorld(true);const bx=new THREE.Box3().setFromObject(r,true);const sc=h/(bx.max.y-bx.min.y);console.log('H',u.split('/').pop(),bx.min.y.toFixed(2),bx.max.y.toFixed(2),sc.toFixed(3));r.scale.multiplyScalar(sc);const bones={};r.traverse(o=>{if(o.isBone)bones[o.name]=o;});return {r,mx,A,bones};}
-function pose(c,w){for(const k in c.A)c.A[k].weight=0;for(const [n,tt,wt] of w){const a=c.A[n];if(!a)continue;a.time=((tt%a.getClip().duration)+a.getClip().duration)%a.getClip().duration;a.weight=wt;}c.mx.update(0);}
+function pose(c,w){if(!c.rest){c.rest=[];c.r.traverse(o=>{if(o.isBone)c.rest.push([o,o.quaternion.clone(),o.position.clone()]);});}for(const [b,q,ps] of c.rest){b.quaternion.copy(q);b.position.copy(ps);}for(const k in c.A)c.A[k].weight=0;for(const [n,tt,wt] of w){const a=c.A[n];if(!a)continue;a.time=((tt%a.getClip().duration)+a.getClip().duration)%a.getClip().duration;a.weight=wt;}c.mx.update(0);}
 const HERO=await chr(MM+'m_hoodie.gltf',1.8);
 const NPC=[await chr(MW+'w_casual.gltf',1.7),await chr(MM+'m_suit.gltf',1.82),await chr(MW+'w_formal.gltf',1.68),await chr(MM+'m_worker.gltf',1.8)];
 // Schrittlänge messen: Geschwindigkeit des Standbeins relativ zur Figur
