@@ -9,7 +9,7 @@ body{margin:0;background:#111;color:#eee;font:15px sans-serif;display:flex;gap:1
 #ui button{font-size:18px;padding:10px 18px;margin:6px 0;display:block}
 #st{white-space:pre-wrap;max-width:320px}
 </style></head><body><canvas id="c" width="1080" height="1920"></canvas><canvas id="out" width="1080" height="1920"></canvas>
-<div id="ui"><b>markenmasche GPU-Render</b><button id="go">Rendern starten</button><button id="sv" disabled>Video speichern</button><div id="st">Lädt Szene…</div></div>
+<div id="ui"><b>markenmasche GPU-Render</b><button id="pick">Zielordner wählen (einmalig)</button><div id="dir"></div><button id="go">Rendern starten</button><button id="sv" disabled>Video speichern</button><div id="st">Lädt Szene…</div></div>
 <script type="module">
 import * as THREE from 'three';import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {EffectComposer} from 'three/addons/postprocessing/EffectComposer.js';import {RenderPass} from 'three/addons/postprocessing/RenderPass.js';
@@ -195,6 +195,10 @@ async function go(){$('go').disabled=true;const t0=performance.now();
  const secs=((performance.now()-t0)/1000).toFixed(1);st.textContent=`Fertig: ${N} Bilder in ${secs} s (${(VIDEO.size/1e6).toFixed(1)} MB). `;window.RESULT={secs,size:VIDEO.size};$('sv').disabled=false;}
 
 $("go").onclick=go;window.go=go;window.compose=compose;
-const save=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(VIDEO);a.download=(window.OUTNAME||'s02.mp4');document.body.appendChild(a);a.click();st.textContent+='\nDownload gestartet ✓';};$('sv').onclick=save;window.save=save;
+import {pickDir,dirStatus,ensurePerm,saveToDir} from './lib/savedir.js';
+async function showDir(){const d=await dirStatus();$('dir').textContent=d.name?('Ordner: '+d.name+' ('+(d.perm==='granted'?'Schreibzugriff ok':'Zugriff bestätigen')+')'):'Kein Ordner gewählt';return d;}
+$('pick').onclick=async()=>{try{await pickDir();await ensurePerm();}catch(e){$('dir').textContent='Abgebrochen: '+e.message;}showDir();};
+showDir();window.dirStatus=dirStatus;
+const save=async()=>{const name=(window.OUTNAME||'render.mp4');try{const p=await saveToDir(name,VIDEO);st.textContent+='\nGespeichert in '+p+' ✓';window.SAVED=p;return p;}catch(e){st.textContent+='\nOrdner-Speichern ging nicht ('+e.message+'), Download stattdessen';const a=document.createElement('a');a.href=URL.createObjectURL(VIDEO);a.download=name;document.body.appendChild(a);a.click();window.SAVED='download';return 'download';}};$('sv').onclick=save;window.save=save;
 window.init(WORDS_EMB);window.DBG={AO,BLOOM,BOK,R,S,COMP,KEY,CAM,HERO,NPC,THREE};window.PLAIN=false;window.ready=true;st.textContent='Szene geladen. Bereit.';
 </script></body></html>
