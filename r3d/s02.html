@@ -31,7 +31,7 @@ const BREADL=new THREE.PointLight(0xffa64d,6,6,1.6);BREADL.position.set(-1.9,2.3
 const L=new GLTFLoader();
 function prep(root,shadow=true){root.traverse(o=>{if(o.isMesh){o.castShadow=shadow;o.receiveShadow=true;const ms=Array.isArray(o.material)?o.material:[o.material];ms.forEach(m=>{if(m.isMeshStandardMaterial){m.roughness=Math.max(.45,m.roughness??.6);m.envMapIntensity=.6;}});}});}
 const SH='assets/shop/';
-async function prop(n,x,z,ry=0,sc=1.9,y=0){const g=await L.loadAsync(SH+n+'.glb');const r=g.scene;r.position.set(x,y,z);r.rotation.y=ry;r.scale.setScalar(sc);prep(r);S.add(r);return r;}
+async function prop(n,x,z,ry=0,sc=1.9,y=0){const g=await L.loadAsync(SH+n+'.glb');const r=g.scene;r.userData.solid=n.startsWith('shelf')?'shelf':(n.startsWith('freezer')?'freezer':(n.startsWith('display')?'display':null));r.position.set(x,y,z);r.rotation.y=ry;r.scale.setScalar(sc);prep(r);S.add(r);return r;}
 // Boden: glänzende Fliesen
 const tc=document.createElement('canvas');tc.width=tc.height=256;{const g=tc.getContext('2d');g.fillStyle='#efe3cf';g.fillRect(0,0,256,256);g.fillStyle='#e4d4ba';g.fillRect(0,0,128,128);g.fillRect(128,128,128,128);g.strokeStyle='#d2bf9f';g.lineWidth=3;g.strokeRect(0,0,256,256);g.beginPath();g.moveTo(128,0);g.lineTo(128,256);g.moveTo(0,128);g.lineTo(256,128);g.stroke();}
 const ftx=new THREE.CanvasTexture(tc);ftx.wrapS=ftx.wrapT=THREE.RepeatWrapping;ftx.repeat.set(20,20);ftx.colorSpace=THREE.SRGBColorSpace;ftx.anisotropy=8;
@@ -62,7 +62,18 @@ const MM='assets/chars/';
 const MW='assets/chars/';
 async function chr(u,h=1.8){const g=await L.loadAsync(u);const r=g.scene;prep(r);S.add(r);const mx=new THREE.AnimationMixer(r);const A={};g.animations.forEach(a=>{A[a.name]=mx.clipAction(a);A[a.name].play();A[a.name].weight=0;});
  r.updateMatrixWorld(true);const bx=new THREE.Box3().setFromObject(r,true);const sc=h/(bx.max.y-bx.min.y);console.log('H',u.split('/').pop(),bx.min.y.toFixed(2),bx.max.y.toFixed(2),sc.toFixed(3));r.scale.multiplyScalar(sc);const bones={};r.traverse(o=>{if(o.isBone)bones[o.name]=o;});return {r,mx,A,bones};}
-function pose(c,w){for(const k in c.A)c.A[k].weight=0;for(const [n,tt,wt] of w){const a=c.A[n];if(!a)continue;a.time=((tt%a.getClip().duration)+a.getClip().duration)%a.getClip().duration;a.weight=wt;}c.mx.update(0);}
+// Zustandslose Pose: Clips direkt auswerten und gewichtet mischen (kein Mixer-Zustand, keine Sprünge)
+function pose(c,w){if(!c.rest){c.r.traverse(o=>{if(o.isSkinnedMesh)o.skeleton.pose();});c.rest=new Map();c.r.traverse(o=>{if(o.isBone||o.name)c.rest.set(o,[o.quaternion.clone(),o.position.clone(),o.scale.clone()]);});c.tr={};}
+ for(const [o,[q,ps,sc]] of c.rest){o.quaternion.copy(q);o.position.copy(ps);o.scale.copy(sc);}
+ const acc=new Map();
+ for(const [n,tt,wt] of w){const a=c.A[n];if(!a||wt<=0)continue;const clip=a.getClip();const d=clip.duration;const time=((tt%d)+d)%d;
+  if(!c.tr[n])c.tr[n]=clip.tracks.map(tk=>{const dot=tk.name.lastIndexOf('.');const node=c.r.getObjectByName(tk.name.slice(0,dot));return {node,prop:tk.name.slice(dot+1),ip:tk.createInterpolant(),size:tk.getValueSize()};}).filter(x=>x.node&&['quaternion','position','scale'].includes(x.prop));
+  for(const k of c.tr[n]){const v=k.ip.evaluate(time);const key=k.node.uuid+k.prop;let e=acc.get(key);if(!e){e={node:k.node,prop:k.prop,list:[]};acc.set(key,e);}e.list.push([Array.from(v),wt]);}}
+ const tq=new THREE.Quaternion(),tv=new THREE.Vector3();
+ for(const e of acc.values()){let W=e.list.reduce((s,x)=>s+x[1],0);const items=e.list.slice();if(W<1){const r=c.rest.get(e.node);const base=e.prop==='quaternion'?r[0].toArray():(e.prop==='position'?r[1].toArray():r[2].toArray());items.unshift([base,1-W]);W=1;}
+  if(e.prop==='quaternion'){const q=new THREE.Quaternion().fromArray(items[0][0]);let aw=items[0][1];for(let i=1;i<items.length;i++){tq.fromArray(items[i][0]);if(q.dot(tq)<0)tq.set(-tq.x,-tq.y,-tq.z,-tq.w);aw+=items[i][1];q.slerp(tq,items[i][1]/aw);}e.node.quaternion.copy(q.normalize());}
+  else{const v=new THREE.Vector3();for(const [a,wt] of items)v.add(tv.fromArray(a).multiplyScalar(wt/W));e.node[e.prop].copy(v);}}
+ c.r.updateMatrixWorld(true);}
 const HERO=await chr(MM+'m_hoodie.gltf',1.8);
 const NPC=[await chr(MW+'w_casual.gltf',1.7),await chr(MM+'m_suit.gltf',1.82),await chr(MW+'w_formal.gltf',1.68),await chr(MM+'m_worker.gltf',1.8)];
 // Schrittlänge messen: Geschwindigkeit des Standbeins relativ zur Figur
@@ -113,12 +124,12 @@ function box(w,h,d,col,lab){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),
  if(lab){const t=new THREE.Mesh(new THREE.BoxGeometry(w*1.002,h*0.35,d*1.002),new THREE.MeshStandardMaterial({color:lab,roughness:.5}));m.add(t);}S.add(m);return m;}
 const FLOOR_Y=0.222*CS;// Korbboden (Wagen-lokal)
 const INCART=[[box(.16,.24,.12,'#2f80ed','#fff'),-0.12,0.05,0.2],[box(.22,.12,.16,'#eb5757','#ffd21f'),0.12,-0.05,0.0],[box(.12,.2,.12,'#27ae60','#fff'),0.02,0.15,0.6],[box(.2,.1,.14,'#f2994a','#fff'),-0.1,-0.2,-0.4]];
-const ITEM=box(.14,.22,.11,'#9b51e0','#fff');const ITEM0=V3(-2.30,1.62+0.11,-5.25);
-const SHELFITEMS=[];for(let i=0;i<5;i++){const b2=box(.14,.22,.11,'#9b51e0','#fff');b2.position.set(-2.30-(i%2)*0.16,1.73,-5.05-i*0.2+(i===0?0:0));if(Math.abs(b2.position.z-ITEM0.z)<0.12&&b2.position.x>-2.36)b2.position.z-=0.35;SHELFITEMS.push(b2);}
+const ITEM=box(.12,.2,.1,'#9b51e0','#fff');const ITEM0=V3(-2.29,1.045+0.1,-5.62);
+const SHELFITEMS=[];for(let i=0;i<5;i++){const b2=box(.14,.22,.11,'#9b51e0','#fff');b2.position.set(-2.29-(i%2)*0.14,1.045+0.1,-5.62+(i<2?-0.16*(i+1):0.16*(i-1)));if(Math.abs(b2.position.z-ITEM0.z)<0.12&&b2.position.x>-2.36)b2.position.z-=0.35;SHELFITEMS.push(b2);}
 // Lautsprecher an der Decke
 const spk=box(.5,.3,.3,'#2b2b2b');spk.position.set(0,4.85,-8.2);
 // Zeitplan
-const T_MUS=W1('Musik'),T_SLOW=W1('langsamer'),T_STOPW=3.45,T_REACH=3.55,T_GRAB=4.1,T_DROP=4.75,T_BACK=5.35,X_PATH=-1.7,Z_STOP=-5.75;
+const T_MUS=W1('Musik'),T_SLOW=W1('langsamer'),T_STOPW=3.45,T_REACH=3.55,T_GRAB=4.1,T_DROP=4.9,T_BACK=5.55,X_PATH=-1.6,Z_STOP=-5.75;
 function W1(w){const o=WORDS_EMB.find(x=>x.w.replace(/[.,:]/g,'')===w);return o?o.t0:0;}
 const vH=VW[HERO.r.uuid];
 // Geschwindigkeitsprofil: normal -> langsamer (ab "langsamer") -> Stopp
@@ -126,36 +137,54 @@ function heroDist(t){let d=0;const dt=1/240;for(let q=0;q<t;q+=dt){let v=vH*0.95
 const DSTOP=heroDist(T_STOPW+1);
 // Fallende Ware (Physik)
 function dropY(t,y0,yFloor){if(t<=0)return y0;const g=9.81;const y=y0-0.5*g*t*t;if(y>yFloor)return y;const tl=Math.sqrt(2*(y0-yFloor)/g),vI=g*tl,t2=t-tl,vb=vI*0.18;const yb=yFloor+vb*t2-0.5*g*t2*t2;return Math.max(yFloor,yb);}
-const NOTEP=[];for(let i=0;i<7;i++)NOTEP.push({t0:T_MUS-0.2+i*0.38,x:(i%2?0.6:-0.6)+Math.sin(i*2.1)*0.3,ph:i*1.3});
+const LEANS=[];const NOTEP=[];for(let i=0;i<7;i++)NOTEP.push({t0:T_MUS-0.2+i*0.38,x:(i%2?0.6:-0.6)+Math.sin(i*2.1)*0.3,ph:i*1.3});
+
+window.selfCheck=(dur=6.0,fps=60)=>{const P=window.PLAIN;window.PLAIN=true;const iss=[];const bones=[];[HERO,...NPC].forEach((c,ci)=>c.r.traverse(o=>{if(o.isBone&&/^(Hips|Abdomen|Chest|Neck|Head|UpperArm[LR]|LowerArm[LR]|UpperLeg[LR]|LowerLeg[LR])$/.test(o.name))bones.push([ci,o]);}));
+ const boxes=[];S.children.forEach(o=>{if(o.userData&&o.userData.solid){const b=new THREE.Box3().setFromObject(o);boxes.push([o.userData.solid,b]);}});
+ let prevQ=null,prevItem=null;const q=new THREE.Quaternion();
+ for(let f=0;f<=Math.round(dur*fps);f++){const t=f/fps;render(t);
+  const Q=bones.map(([ci,b])=>{b.getWorldQuaternion(q);return q.clone();});
+  if(prevQ){Q.forEach((qq,i)=>{const ang=2*Math.acos(Math.min(1,Math.abs(qq.dot(prevQ[i]))))*180/Math.PI;if(ang>9)iss.push(`t=${t.toFixed(2)} Knochen ${bones[i][1].name} (Figur ${bones[i][0]}) dreht ${ang.toFixed(0)}°/Bild`);});}
+  prevQ=Q;
+  const ip=ITEM.position.clone();if(prevItem&&ip.distanceTo(prevItem)>0.12)iss.push(`t=${t.toFixed(2)} Ware springt ${ip.distanceTo(prevItem).toFixed(2)} m`);prevItem=ip;
+  const hands=[HERO.bones.WristR.getWorldPosition(V3()),HERO.bones.WristL.getWorldPosition(V3())];
+  for(const [nm,b] of boxes){const inner=b.clone().expandByScalar(-0.03);for(const h of hands)if(inner.containsPoint(h)&&!(nm==='shelf'&&h.y>b.max.y-0.05))iss.push(`t=${t.toFixed(2)} Hand in ${nm}`);}
+ }
+ window.PLAIN=P;const uniq=[...new Set(iss)];return {n:uniq.length,first:uniq.slice(0,25)};};
+
 window.render=(t)=>{
  const d=heroDist(t);const v=(heroDist(t+0.01)-d)/0.01;const zH=Z_STOP-(DSTOP-d);
  const dur=HERO.A.Walk.getClip().duration;const wW=cl(v/(vH*0.35));
- pose(HERO,[['Walk',d/vH,wW],['Idle',t,1-wW]]);HERO.A.Walk.time=(d/vH)%dur;HERO.mx.update(0);
+ pose(HERO,[["Walk",d/vH,wW],["Idle_Neutral",t,1-wW]]);
  HERO.r.position.set(X_PATH,0,zH);HERO.r.rotation.y=0;HERO.r.updateMatrixWorld(true);
  cart.position.set(X_PATH,0,zH+CART_OFF);cart.rotation.y=0;cart.updateMatrixWorld(true);
  // Ware im Wagen bewegt sich mit dem Wagen
  INCART.forEach(([m,x,z,ry])=>{m.position.set(cart.position.x+x,FLOOR_Y+m.geometry.parameters.height/2,cart.position.z+z);m.rotation.y=ry;});
- // Oberkörper: leichte Drehung zum Regal beim Greifen, Gewicht nach vorne beim Bremsen
- const reachK=eio(p(t,T_REACH-0.2,T_GRAB))*(1-eio(p(t,T_DROP+0.1,T_BACK)));
- rotW(HERO.bones.Abdomen,V3(0,1,0),-0.42*reachK);rotW(HERO.bones.Chest,V3(0,1,0),-0.18*reachK);
+ // Bremsen: Gewicht nach vorne
  const brake=Math.sin(Math.PI*p(t,T_STOPW-0.7,T_STOPW+0.35))*0.07;rotW(HERO.bones.Abdomen,V3(1,0,0),brake);
- // Kopf schaut zum Produkt, dann in den Wagen
- rotW(HERO.bones.Head,V3(0,1,0),-0.45*eio(p(t,T_REACH-0.35,T_REACH+0.2))*(1-eio(p(t,T_GRAB+0.1,T_DROP))));
- rotW(HERO.bones.Head,V3(1,0,0),0.25*eio(p(t,T_GRAB+0.1,T_DROP-0.1))*(1-eio(p(t,T_DROP+0.2,T_BACK))));
- // Hände: links immer am Griff, rechts am Griff -> Produkt -> über den Wagen -> zurück
+ // Ziele: linke Hand immer am Griff; rechte Hand Griff -> Produkt -> hinten über den Korb -> zurück
  const hl=V3(cart.position.x+HANDLE_X,HANDLE_Y,cart.position.z+HANDLE_Z),hr=V3(cart.position.x-HANDLE_X,HANDLE_Y,cart.position.z+HANDLE_Z);
- const ab=V3(cart.position.x-0.06,FLOOR_Y+0.42,cart.position.z+0.08);const grabP=ITEM0.clone().add(V3(0.0,0.0,0));
- let tr=hr.clone();const arc=(a,b,k,hgt)=>a.clone().lerp(b,eio(k)).add(V3(0,Math.sin(Math.PI*k)*hgt,0));
- if(t>=T_REACH&&t<T_GRAB)tr=arc(hr,grabP,p(t,T_REACH,T_GRAB),0.12);else if(t>=T_GRAB&&t<T_GRAB+0.1)tr=grabP;else if(t>=T_GRAB+0.1&&t<T_DROP)tr=arc(grabP,ab,p(t,T_GRAB+0.1,T_DROP),0.12);else if(t>=T_DROP&&t<T_BACK)tr=arc(ab,hr,p(t,T_DROP,T_BACK),0.05);
- const yaw=new THREE.Quaternion();HERO.r.getWorldQuaternion(yaw);
- const poleL=HERO.r.localToWorld(V3(0.9,0.2,-0.8)),poleR=HERO.r.localToWorld(V3(-0.9,0.2,-0.8));
+ const GRIP=V3(0.07,-0.03,0);// Handgelenk sitzt etwas neben dem Produkt (Hand greift)
+ const grabW=ITEM0.clone().add(GRIP);const dropItem=V3(cart.position.x-0.1,FLOOR_Y+0.42,cart.position.z+HANDLE_Z+0.33);const dropW=dropItem.clone().add(GRIP);
+ const arc=(a,b,k,hgt)=>a.clone().lerp(b,eio(k)).add(V3(0,Math.sin(Math.PI*k)*hgt,0));
+ let tr=hr.clone();if(t>=T_REACH&&t<T_GRAB)tr=arc(hr,grabW,p(t,T_REACH,T_GRAB),0.06);else if(t>=T_GRAB&&t<T_GRAB+0.12)tr=grabW;else if(t>=T_GRAB+0.12&&t<T_DROP)tr=arc(grabW,dropW,p(t,T_GRAB+0.12,T_DROP),0.06);else if(t>=T_DROP+0.08&&t<T_BACK)tr=arc(dropW,hr,p(t,T_DROP+0.08,T_BACK),0.03);else if(t>=T_DROP&&t<T_DROP+0.08)tr=dropW;
+ // Oberkörper neigt sich natürlich so weit zum Ziel, dass die Hand es wirklich erreicht (max. 35°)
+ const SHR=HERO.bones.UpperArmR,PIV=HERO.bones.Abdomen;
+ const need=()=>{HERO.r.updateMatrixWorld(true);return SHR.getWorldPosition(V3()).distanceTo(tr)-ARM*0.97;};
+ let lean=0;if(need()>0){const piv=PIV.getWorldPosition(V3()),sh=SHR.getWorldPosition(V3());const ax=sh.clone().sub(piv).cross(tr.clone().sub(piv)).normalize();
+  const q0=PIV.quaternion.clone();let lo=0,hi=0.61;for(let it=0;it<14;it++){const m=(lo+hi)/2;PIV.quaternion.copy(q0);rotW(PIV,ax,m);if(need()>0)lo=m;else hi=m;}PIV.quaternion.copy(q0);lean=hi;LEANS.push([t,lean]);
+  // geglättet: gleiche Achse, Winkel aus Zeitverlauf (keine Sprünge)
+  rotW(PIV,ax,lean);}
+ // Kopf schaut zum Produkt, dann in den Wagen
+ rotW(HERO.bones.Head,V3(0,1,0),-0.5*eio(p(t,T_REACH-0.35,T_REACH+0.2))*(1-eio(p(t,T_GRAB+0.1,T_DROP))));
+ rotW(HERO.bones.Head,V3(1,0,0),0.3*eio(p(t,T_GRAB+0.1,T_DROP-0.1))*(1-eio(p(t,T_DROP+0.2,T_BACK))));
+ const poleL=HERO.r.localToWorld(V3(0.7,-0.9,-0.5)),poleR=HERO.r.localToWorld(V3(-0.7,-0.9,-0.5));
  ik(HERO,'L',hl,poleL,1);ik(HERO,'R',tr,poleR,1);
- // Produkt: liegt im Regal -> in der Hand -> fällt in den Wagen
- const wr=HERO.bones.WristR.getWorldPosition(V3());
+ const wr=HERO.bones.WristR.getWorldPosition(V3());window.IKERR=Math.max(window.IKERR||0,wr.distanceTo(tr));
+ // Produkt: liegt im Regal -> wird in der Hand mitgenommen -> fällt senkrecht in den Korb
  if(t<T_GRAB){ITEM.position.copy(ITEM0);ITEM.rotation.set(0,0,0);}
- else if(t<T_DROP){ITEM.position.copy(wr).add(V3(0,-0.02,0.03));ITEM.rotation.set(0,0.3,0);}
- else{const rel=wr.clone();if(!window._rel||window._relT!==Math.round(T_DROP*1000)){}const relP=window._dropStart||(window._dropStart=null);
-  const sx=ab.x,sz=ab.z;const y0=ab.y-0.02;ITEM.position.set(sx,dropY(t-T_DROP,y0,FLOOR_Y+0.11),sz);ITEM.rotation.set(0,0.3,0);}
+ else if(t<T_DROP){ITEM.position.copy(wr).sub(GRIP);ITEM.rotation.set(0,0,0);}
+ else{ITEM.position.set(dropItem.x,dropY(t-T_DROP,dropItem.y,FLOOR_Y+0.1),dropItem.z);ITEM.rotation.set(0,0,0);}
  // Statisten: niemand kreuzt Regale oder Figuren
  const [n1,n2,n3,n4]=NPC;
  pose(n1,[['Walk',t*1+0.3,1]]);n1.r.position.set(-2.0+VW[n1.r.uuid]*t,0,-16.75);n1.r.rotation.y=Math.PI/2;
@@ -199,5 +228,5 @@ import {hasToken,setToken,uploadGH} from './lib/ghsave.js';
 function showTok(){$('dir').textContent=hasToken()?'GitHub-Schlüssel gespeichert ✓ – Upload läuft automatisch':'Noch kein GitHub-Schlüssel';}
 $('tsave').onclick=()=>{const v=$('tok').value;if(v.trim().length>20){setToken(v);$('tok').value='';}showTok();};showTok();window.hasToken=hasToken;
 const save=async()=>{const name=(window.OUTNAME||'render.mp4');st.textContent+='\nLade zu GitHub hoch…';try{const p=await uploadGH('inbox/'+name,VIDEO);st.textContent+='\nHochgeladen: '+p+' ✓';window.SAVED=p;return p;}catch(e){st.textContent+='\nUpload fehlgeschlagen: '+e.message;window.SAVED='error: '+e.message;return null;}};$('sv').onclick=save;window.save=save;
-window.init(WORDS_EMB);window.DBG={AO,BLOOM,BOK,R,S,COMP,KEY,CAM,HERO,NPC,THREE};window.PLAIN=false;window.ready=true;st.textContent='Szene geladen. Bereit.';
+window.init(WORDS_EMB);window.DBG={AO,BLOOM,BOK,R,S,COMP,KEY,CAM,HERO,NPC,THREE,pose};window.PLAIN=false;window.ready=true;st.textContent='Szene geladen. Bereit.';
 </script></body></html>

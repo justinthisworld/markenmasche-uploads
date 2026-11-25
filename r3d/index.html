@@ -62,7 +62,18 @@ const MM='assets/chars/';
 const MW='assets/chars/';
 async function chr(u,h=1.8){const g=await L.loadAsync(u);const r=g.scene;prep(r);S.add(r);const mx=new THREE.AnimationMixer(r);const A={};g.animations.forEach(a=>{A[a.name]=mx.clipAction(a);A[a.name].play();A[a.name].weight=0;});
  r.updateMatrixWorld(true);const bx=new THREE.Box3().setFromObject(r,true);const sc=h/(bx.max.y-bx.min.y);console.log('H',u.split('/').pop(),bx.min.y.toFixed(2),bx.max.y.toFixed(2),sc.toFixed(3));r.scale.multiplyScalar(sc);const bones={};r.traverse(o=>{if(o.isBone)bones[o.name]=o;});return {r,mx,A,bones};}
-function pose(c,w){for(const k in c.A)c.A[k].weight=0;for(const [n,tt,wt] of w){const a=c.A[n];if(!a)continue;a.time=((tt%a.getClip().duration)+a.getClip().duration)%a.getClip().duration;a.weight=wt;}c.mx.update(0);}
+// Zustandslose Pose: Clips direkt auswerten und gewichtet mischen (kein Mixer-Zustand, keine Sprünge)
+function pose(c,w){if(!c.rest){c.r.traverse(o=>{if(o.isSkinnedMesh)o.skeleton.pose();});c.rest=new Map();c.r.traverse(o=>{if(o.isBone||o.name)c.rest.set(o,[o.quaternion.clone(),o.position.clone(),o.scale.clone()]);});c.tr={};}
+ for(const [o,[q,ps,sc]] of c.rest){o.quaternion.copy(q);o.position.copy(ps);o.scale.copy(sc);}
+ const acc=new Map();
+ for(const [n,tt,wt] of w){const a=c.A[n];if(!a||wt<=0)continue;const clip=a.getClip();const d=clip.duration;const time=((tt%d)+d)%d;
+  if(!c.tr[n])c.tr[n]=clip.tracks.map(tk=>{const dot=tk.name.lastIndexOf('.');const node=c.r.getObjectByName(tk.name.slice(0,dot));return {node,prop:tk.name.slice(dot+1),ip:tk.createInterpolant(),size:tk.getValueSize()};}).filter(x=>x.node&&['quaternion','position','scale'].includes(x.prop));
+  for(const k of c.tr[n]){const v=k.ip.evaluate(time);const key=k.node.uuid+k.prop;let e=acc.get(key);if(!e){e={node:k.node,prop:k.prop,list:[]};acc.set(key,e);}e.list.push([Array.from(v),wt]);}}
+ const tq=new THREE.Quaternion(),tv=new THREE.Vector3();
+ for(const e of acc.values()){let W=e.list.reduce((s,x)=>s+x[1],0);const items=e.list.slice();if(W<1){const r=c.rest.get(e.node);const base=e.prop==='quaternion'?r[0].toArray():(e.prop==='position'?r[1].toArray():r[2].toArray());items.unshift([base,1-W]);W=1;}
+  if(e.prop==='quaternion'){const q=new THREE.Quaternion().fromArray(items[0][0]);let aw=items[0][1];for(let i=1;i<items.length;i++){tq.fromArray(items[i][0]);if(q.dot(tq)<0)tq.set(-tq.x,-tq.y,-tq.z,-tq.w);aw+=items[i][1];q.slerp(tq,items[i][1]/aw);}e.node.quaternion.copy(q.normalize());}
+  else{const v=new THREE.Vector3();for(const [a,wt] of items)v.add(tv.fromArray(a).multiplyScalar(wt/W));e.node[e.prop].copy(v);}}
+ c.r.updateMatrixWorld(true);}
 const HERO=await chr(MM+'m_hoodie.gltf',1.8);
 const NPC=[await chr(MW+'w_casual.gltf',1.7),await chr(MM+'m_suit.gltf',1.82),await chr(MW+'w_formal.gltf',1.68),await chr(MM+'m_worker.gltf',1.8)];
 // Schrittlänge messen: Geschwindigkeit des Standbeins relativ zur Figur
